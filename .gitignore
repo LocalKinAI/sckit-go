@@ -1,0 +1,23 @@
+# The embedded dylib at internal/dylib/libsckit_sync.dylib IS committed
+# (it's how `go get` works without forcing downstream `make dylib`).
+# A legacy root-level copy, if produced, is a build artifact — ignore it.
+/libsckit_sync.dylib
+*.dylib.dSYM/
+
+# Go
+/vendor/
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Example output
+/tmp/
+capture.png
+screenshot.png

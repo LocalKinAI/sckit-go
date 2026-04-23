@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LocalKinAI/sckit-go/security/advisories/new
+    about: |
+      Please use GitHub Security Advisories (or email security@localkin.ai)
+      instead of a public issue for security reports. See SECURITY.md.
+  - name: Questions / discussion
+    url: https://github.com/LocalKinAI/sckit-go/discussions
+    about: For open-ended questions, usage help, and API design discussion.

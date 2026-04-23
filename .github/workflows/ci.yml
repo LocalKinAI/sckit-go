@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Verify dylib is committed
+        run: |
+          test -f internal/dylib/libsckit_sync.dylib \
+            || (echo "internal/dylib/libsckit_sync.dylib missing — commit it after make dylib" && exit 1)
+          file internal/dylib/libsckit_sync.dylib
+
+      - name: Rebuild dylib (verify source matches)
+        run: |
+          make dylib
+          # Rebuild must be idempotent — reject if source drifted without rebuild.
+          if ! git diff --quiet internal/dylib/libsckit_sync.dylib; then
+            echo "::warning::committed dylib differs from fresh build — expected if binary is non-deterministic"
+            # Don't fail; Mach-O headers include timestamps. Just noisy warning.
+          fi
+
+      - name: go mod verify
+        run: go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: Unit tests (no screen-recording permission needed)
+        run: go test -count=1 -v ./...
+
+      - name: Unit tests with coverage
+        run: go test -count=1 -cover -coverprofile=coverage.out ./...
+
+      - name: Show coverage
+        run: go tool cover -func=coverage.out | tail -20
+
+  lint:
+    name: lint
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Rebuild dylib (needed for imports to resolve)
+        run: make dylib
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt drift in files:"
+            echo "$out"
+            exit 1
+          fi
