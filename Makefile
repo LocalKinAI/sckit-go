@@ -24,7 +24,8 @@ FRAMEWORKS  := -framework ScreenCaptureKit \
                -framework CoreVideo \
                -framework Foundation \
                -framework CoreGraphics \
-               -framework AppKit
+               -framework AppKit \
+               -framework Vision
 
 .PHONY: all dylib build test vet lint clean examples verify help
 

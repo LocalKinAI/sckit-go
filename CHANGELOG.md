@@ -5,6 +5,62 @@ All notable changes to sckit-go are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-29
+
+Adds **on-device OCR via Apple Vision framework** as a sibling to the
+screen-capture API. Same dylib, one new exported function.
+
+### Added — `sckit.OCR(imageBytes []byte) ([]TextRegion, error)`
+
+```go
+shot, _ := sckit.CaptureDisplay(...)            // existing — PNG bytes
+regions, _ := sckit.OCR(shot)                   // NEW — recognized text
+for _, r := range regions {
+    fmt.Printf("%q at (%d,%d) size %dx%d conf=%.2f\n",
+        r.Text, r.X, r.Y, r.W, r.H, r.Confidence)
+}
+```
+
+`TextRegion` carries the recognized string, the bounding box in
+**image-pixel coordinates with top-left origin** (the convention
+CGImage / drawing systems use; Vision's native bottom-left coords are
+converted by the dylib), and a confidence in [0, 1].
+
+Implementation: `VNRecognizeTextRequest` running synchronously inside
+the existing companion dylib. Recognition level: `Accurate` (slower
+but higher quality on noisy screen captures). Language correction:
+on. Both opinionated for the agent use-case; v0.2.0 doesn't expose
+knobs for them.
+
+Requires macOS 11+ (Vision framework). Existing macOS 14+ floor for
+SCScreenshotManager unchanged.
+
+### Why this matters
+
+Without OCR, "what does the calculator display say" needed a screen
+capture → vision-LLM round-trip (~$0.005 + ~3s + dependence on a
+brain provider). With OCR, the same task is local + offline + free
++ ~50-200ms. Downstream agents can gate on this for "extract text
+from this region without burning vision tokens" use cases.
+
+When NOT to use it: if you need *understanding* of screen content
+(intent / structure / what to do next), that's still a vision LLM
+job. OCR returns text + boxes, nothing more.
+
+### Build
+
+- New framework dependency: `Vision` (linked in `Makefile`).
+  `make dylib` rebuilds with `-framework Vision` added.
+- `go test ./...` — all green; 3 new test cases (`TestOCR_*`)
+  including a self-contained pipeline test that renders a PNG with
+  Go's `image` package, runs OCR, asserts the text comes back.
+
+### Dependencies
+
+One new direct dep: `golang.org/x/image` for the OCR self-test
+(rendered text). Not required for the OCR API itself — the OCR
+function takes `[]byte` from any source.
+
 ## [0.1.0] - 2026-04-22
 
 Initial public release. Pure-Go binding to macOS ScreenCaptureKit; no

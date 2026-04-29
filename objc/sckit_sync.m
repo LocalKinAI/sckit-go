@@ -1050,3 +1050,118 @@ void* sckit_app_stream_start(const char* bundle_id,
     handle->height = eff_h;
     return handle;
 }
+
+
+// ─── OCR via Vision framework ─────────────────────────────────
+//
+// VNRecognizeTextRequest reads a CGImage and returns text observations
+// with bounding boxes (normalized 0-1, bottom-left origin in Vision)
+// and confidence scores. The wrapper accepts arbitrary image bytes
+// (PNG / JPEG / TIFF — anything NSImage can decode), runs the request
+// synchronously, returns JSON to Go.
+//
+// Output JSON:
+//   [{"text": "...", "x": <px>, "y": <px>, "w": <px>, "h": <px>, "conf": 0.95}, ...]
+//
+// Coordinates are converted to image-pixel space with top-left origin
+// (the convention KinClaw + Go consumers expect — matches CGImage's
+// drawing convention, not Vision's).
+//
+// Recognition level: VNRequestTextRecognitionLevelAccurate (default).
+// Language correction: ON (improves results on noisy screen captures).
+
+#import <Vision/Vision.h>
+
+int sckit_ocr_image(const void* img_bytes, int img_len,
+                    char* out_json, int out_cap,
+                    char* err_msg, int err_len) {
+    if (!img_bytes || img_len <= 0) {
+        sckit_copy_str("empty image bytes", err_msg, err_len);
+        return -1;
+    }
+    if (!out_json || out_cap <= 0) {
+        sckit_copy_str("empty output buffer", err_msg, err_len);
+        return -1;
+    }
+    @autoreleasepool {
+        NSData* data = [NSData dataWithBytes:img_bytes length:(NSUInteger)img_len];
+        NSImage* nsImg = [[NSImage alloc] initWithData:data];
+        if (!nsImg) {
+            sckit_copy_str("NSImage decode failed", err_msg, err_len);
+            return -1;
+        }
+        // Convert NSImage → CGImage. Pin to actual pixel size so OCR
+        // operates on the source resolution (not the @1x rendering).
+        NSRect rect = NSMakeRect(0, 0, nsImg.size.width, nsImg.size.height);
+        CGImageRef cgImg = [nsImg CGImageForProposedRect:&rect context:nil hints:nil];
+        if (!cgImg) {
+            sckit_copy_str("CGImage extraction failed", err_msg, err_len);
+            return -1;
+        }
+        size_t imgW = CGImageGetWidth(cgImg);
+        size_t imgH = CGImageGetHeight(cgImg);
+
+        VNImageRequestHandler* handler =
+            [[VNImageRequestHandler alloc] initWithCGImage:cgImg options:@{}];
+        VNRecognizeTextRequest* req = [[VNRecognizeTextRequest alloc] init];
+        req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        req.usesLanguageCorrection = YES;
+
+        NSError* runErr = nil;
+        BOOL ok = [handler performRequests:@[req] error:&runErr];
+        if (!ok || runErr) {
+            sckit_copy_err(runErr ?: [NSError errorWithDomain:@"sckit"
+                                                         code:-1
+                                                     userInfo:@{NSLocalizedDescriptionKey:@"VNRecognizeTextRequest failed"}],
+                           err_msg, err_len);
+            return -1;
+        }
+
+        NSMutableArray* regions = [NSMutableArray arrayWithCapacity:req.results.count];
+        for (VNRecognizedTextObservation* obs in req.results) {
+            VNRecognizedText* top = [obs topCandidates:1].firstObject;
+            if (!top) continue;
+            CGRect bbox = obs.boundingBox;
+            // Vision: normalized 0-1, bottom-left. Convert to pixel,
+            // top-left.
+            double pxX = bbox.origin.x * (double)imgW;
+            double pxY = (double)imgH - (bbox.origin.y + bbox.size.height) * (double)imgH;
+            double pxW = bbox.size.width  * (double)imgW;
+            double pxH = bbox.size.height * (double)imgH;
+            [regions addObject:@{
+                @"text": top.string ?: @"",
+                @"x":    @((int)round(pxX)),
+                @"y":    @((int)round(pxY)),
+                @"w":    @((int)round(pxW)),
+                @"h":    @((int)round(pxH)),
+                @"conf": @(top.confidence),
+            }];
+        }
+
+        NSError* jsonErr = nil;
+        NSData* jsonData = [NSJSONSerialization dataWithJSONObject:regions
+                                                           options:0
+                                                             error:&jsonErr];
+        if (!jsonData || jsonErr) {
+            sckit_copy_err(jsonErr ?: [NSError errorWithDomain:@"sckit"
+                                                          code:-2
+                                                      userInfo:@{NSLocalizedDescriptionKey:@"JSON encoding failed"}],
+                           err_msg, err_len);
+            return -1;
+        }
+        const char* utf8 = [[[NSString alloc] initWithData:jsonData
+                                                  encoding:NSUTF8StringEncoding] UTF8String];
+        if (!utf8) {
+            sckit_copy_str("UTF-8 conversion failed", err_msg, err_len);
+            return -1;
+        }
+        int needed = (int)strlen(utf8) + 1;
+        if (needed > out_cap) {
+            // Caller should resize and retry. Same overflow convention
+            // as kinax-go's string copies: positive return = required cap.
+            return needed;
+        }
+        memcpy(out_json, utf8, (size_t)needed);
+        return 0;
+    }
+}
