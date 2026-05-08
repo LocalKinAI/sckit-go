@@ -63,7 +63,7 @@ import (
 
 // Version is the semantic-version tag of this package.
 // Kept in sync with git tags; updated per release.
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 // DylibPath is an optional override for the location of libsckit_sync.dylib.
 //
