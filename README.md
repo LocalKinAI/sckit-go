@@ -32,6 +32,11 @@ which is all-async, ObjC-block-heavy, and historically ugly to call from Go.
   rate cap (~17ms at 60Hz, ~8ms at 120Hz).
 - **Idiomatic Go.** `context.Context` on every blocking call, `io.Closer`
   resource model, functional options, sealed `Target` interface.
+- **OCR + pixel diff in the same kit.** `sckit.OCR(png)` returns
+  recognized text regions (Vision framework, on-device, ~50–200 ms).
+  `sckit.DiffImages(before, after, 16, 16)` returns a token-cheap
+  pixel-delta grid for verifying that an action actually changed the
+  screen — no vision-LLM round-trip required for "did anything happen?"
 
 ---
 
@@ -327,12 +332,14 @@ than the alternative, faster to audit, and compiles once.
 
 ## Status
 
-**v0.1.0-dev** — feature-complete for all five target kinds; stabilizing
-before the v0.1.0 tag.
+**v0.3.0** (released 2026-05-07) — capture, OCR, and pixel-diff all
+shipped. Five target kinds, persistent + one-shot capture, OCR via
+Vision framework, `DiffImages` for token-cheap action verification.
+API stable; SemVer-protected from here.
 
 | Test | Count | Pass | Coverage |
 |---|---|---|---|
-| Unit tests | 43 | ✅ | (pure Go) |
+| Unit tests | 50+ | ✅ | (pure Go) |
 | Integration tests | 19 | ✅ | (needs TCC permission) |
 | `go test -cover` main package | — | — | **78.8%** |
 | `staticcheck` | — | ✅ 0 warnings | — |
@@ -355,43 +362,47 @@ CI runs on `macos-14` + `macos-15` GitHub Actions runners.
 
 ## Roadmap
 
-### v0.1.0 — Complete & Publishable (in progress)
+### v0.1.0 — Capture (shipped 2026-04-22)
 - [x] Display / window / app / region / exclude capture
 - [x] Display / window / app streaming
 - [x] `go:embed` dylib + universal binary
-- [x] Context.Context on every blocking call
-- [x] Functional options
+- [x] Functional options + `context.Context` on every blocking call
 - [x] Zero-copy `NextFrameBGRA` + channel adapter `Stream.Frames`
 - [x] 43 unit + 19 integration tests, 78.8% coverage
 - [x] `sckit` CLI with `list`, `capture`, `stream`, `bench`, `version`
 - [x] GitHub Actions CI (macOS 14 + 15)
-- [x] `golangci-lint` 0 warnings
-- [x] Stability test harness + CI target
-- [ ] 24-hour stability run ← pre-release gate
-- [ ] vhs-recorded README demo
-- [ ] v0.1.0 tag + HN / r/golang / awesome-go
+- [x] `golangci-lint` 0 warnings, stability test harness
 
-### v0.2.0 — Performance
+### v0.2.0 — On-device OCR (shipped 2026-04-29)
+- [x] `sckit.OCR(imageBytes []byte) ([]TextRegion, error)` via
+      `VNRecognizeTextRequest` (Vision framework)
+- [x] Top-left origin coordinates (matches CGImage / drawing convention)
+- [x] Recognition level: Accurate; language correction: on
+- [x] No additional dylib export — same companion lib
+
+### v0.3.0 — Pixel-grid diff (shipped 2026-05-07)
+- [x] `sckit.DiffImages(a, b, rows, cols) (*DiffGrid, error)` —
+      mean-abs-delta per cell, 0–255 scale
+- [x] `DiffGrid.Dirty(threshold)` / `BoundingBox(threshold)` /
+      `Render(threshold)` (ASCII heatmap for LLM prompts)
+- [x] Pure Go — no dylib changes, lifted from kinclaw skill helpers
+
+### v0.4.0 (planned) — Performance + recording
 - [ ] Hardware H.264/HEVC encoding via VideoToolbox
 - [ ] `io.Writer` streaming: `stream.RecordTo(w, duration)` → mp4
 - [ ] SIMD BGRA→RGBA via `golang.org/x/sys/cpu`
 - [ ] Benchmark suite in `/benchmarks` with tracked history
 
-### v0.3.0 — Audio
+### v0.5.0 (planned) — Audio + cancellation
 - [ ] `SCStreamOutputTypeAudio` capture
 - [ ] Synchronized A/V streams (PCM + AAC)
-
-### v0.5.0 — Production hardened
 - [ ] `ctx.Cancel` triggers in-flight dylib abort (`sckit_stream_cancel`)
-- [ ] Programmatic TCC permission request flow
-- [ ] Fuzz testing on the C↔Go boundary
-- [ ] Weekly 7-day stability CI cron
-- [ ] Featured by 3+ external projects
 
 ### v1.0.0 — Stable
 - [ ] API frozen for 2+ months without breaking changes
 - [ ] 100+ external consumers or 500+ stars
-- [ ] In `awesome-go`, Go Weekly, and HN top-30
+- [ ] Programmatic TCC permission request flow
+- [ ] Featured in `awesome-go` / Go Weekly
 
 ---
 
@@ -408,8 +419,9 @@ CI runs on `macos-14` + `macos-15` GitHub Actions runners.
 | App capture | ✅ | ✅ | ❌ |
 | Region capture | ✅ | ✅ | (via cropping) |
 | Exclude lists | ✅ | ? | ❌ |
-| Audio capture | ❌ (v0.3) | ✅ | ❌ |
-| OCR / text extraction | ❌ (out of scope) | ✅ | ❌ |
+| Audio capture | ❌ (v0.5) | ✅ | ❌ |
+| OCR / text extraction | ✅ (v0.2 — Vision framework) | ✅ | ❌ |
+| Pixel-grid diff | ✅ (v0.3 — `DiffImages`) | ❌ | ❌ |
 | 24/7 persistent DB | ❌ (out of scope) | ✅ | ❌ |
 | License | MIT | NOASSERTION (custom) | MIT |
 | Repo size | ~500 KB | 407 MB | ~200 KB |

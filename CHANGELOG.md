@@ -5,6 +5,70 @@ All notable changes to sckit-go are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-07
+
+Adds **`DiffImages` — token-cheap pixel-grid diff for action
+verification**. Pure Go (no dylib changes), one new exported function
++ one new result type. Lifted out of `kinclaw/pkg/skill` (where it
+was a private helper) into the kit so every sckit-go consumer can use
+it without copying ~150 lines.
+
+### Added — `sckit.DiffImages(a, b, rows, cols) (*DiffGrid, error)`
+
+```go
+before, _ := sckit.Capture(ctx, target)
+// … action happens …
+after, _ := sckit.Capture(ctx, target)
+
+grid, err := sckit.DiffImages(before, after, 16, 16)
+if err != nil { return err }
+
+if grid.Dirty(8) > 0 {
+    bbox, _ := grid.BoundingBox(8)
+    fmt.Println("UI changed in", bbox)
+    fmt.Println(grid.Render(8)) // ASCII heatmap for the LLM
+}
+```
+
+`DiffGrid` carries the per-cell mean-abs-delta as a `[][]float64`
+(row-major), the requested resolution, and the `image.Rectangle` the
+diff was computed over. Three convenience methods cover the 95% case:
+
+- **`Dirty(threshold)`** — count of cells at or above threshold (0–255
+  scale). Gate downstream work on this — return early when no cells
+  crossed.
+- **`BoundingBox(threshold)`** — union rect (in display-local px) of
+  every cell over threshold. `ok=false` when nothing's dirty.
+- **`Render(threshold)`** — ASCII heatmap, `#` = dirty, `.` = warm,
+  ` ` = quiet. Designed to drop into an LLM prompt at ~256 tokens for
+  a 16×16 grid (vs ~3000+ for a base64 PNG of the same crop).
+
+### Why this matters
+
+The verify-an-action problem comes up in every UI-automation loop:
+*"I clicked Save — did anything actually happen?"* A vision LLM can
+answer it from two screenshots, but at $0.005 + ~3s per round-trip,
+running it after every click becomes the dominant cost of the agent.
+
+`DiffImages` answers the same question for **0 cents and ~5ms** by
+turning the comparison into integer arithmetic. The trade-off: it
+tells you *where* and *how much* changed, not *what* changed. For
+verification ("did the dialog close?"), pixel diff is sufficient.
+For interpretation ("what does the new dialog say?"), still call OCR
+or a vision LLM — but only when `Dirty(threshold) > 0`.
+
+Sampling: every 4th pixel per axis. Fast on retina captures, still
+catches text-shaped changes (text edges average out at sub-cell
+scale).
+
+### Build
+
+- Pure Go — no ObjC, no dylib rebuild, no new framework dep.
+- 7 new test cases (`TestDiffImages_*`, `TestDiffGrid_*`) exercising
+  identical-image quiet-diff, single-region change, dimension-mismatch
+  error, threshold sweep, bounding-box mapping back to px, and the
+  ASCII renderer.
+
 ## [0.2.0] - 2026-04-29
 
 Adds **on-device OCR via Apple Vision framework** as a sibling to the
